@@ -72,7 +72,8 @@ export default function AttemptDetailPage({
             
             const isCorrect = ans.is_correct;
             const userChoice = ans.chosen_option;
-            const correctChoice = q.correct_option?.toLowerCase();
+            // FIX: Added .trim() here too
+            const correctChoice = q.correct_option?.trim().toLowerCase();
 
             return (
               <div key={idx} className={`p-5 rounded-xl border ${isCorrect ? 'border-emerald-900/50 bg-emerald-900/5' : userChoice ? 'border-rose-900/50 bg-rose-900/5' : 'border-slate-800 bg-slate-900/20'}`}>

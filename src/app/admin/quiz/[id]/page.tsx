@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { use, useEffect, useMemo, useState } from "react";
@@ -97,7 +98,7 @@ export default function AdminQuizRulesPage({
   }, [rules, subjects]);
 
   const totalQuestionsFromRules = useMemo(() => {
-    return Object.values(rulesMap).reduce((acc, v) => acc + (v || 0), 0);
+    return Object.values(rulesMap).reduce((acc: number, v: number) => acc + (v || 0), 0);
   }, [rulesMap]);
 
   const handleChangeRule = (subjectId: string, value: string) => {

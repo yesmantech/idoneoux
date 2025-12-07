@@ -1,3 +1,4 @@
+
 import { createClient } from '../../lib/supabaseServer';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
@@ -13,8 +14,9 @@ export default async function DashboardPage() {
   }
 
   // 2. Fetch Attempts (with Quiz info)
+  // FIX: Table is 'quiz_attempts', not 'attempts'
   const { data: attempts } = await supabase
-    .from('attempts')
+    .from('quiz_attempts')
     .select('*, quizzes(title, category)')
     .eq('user_id', user.id)
     .order('started_at', { ascending: false });
@@ -120,7 +122,7 @@ export default async function DashboardPage() {
                          </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-400">
-                        {attempt.status === 'completed' ? (
+                        {attempt.finished_at ? (
                           <span className="flex items-center gap-1.5 text-emerald-400/80">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Completato
                           </span>

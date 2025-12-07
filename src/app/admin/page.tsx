@@ -112,6 +112,12 @@ export default function AdminQuestionsPage() {
             Domande
           </button>
           <button
+            onClick={() => router.push("/admin/structure")}
+            className="px-4 py-2 rounded-md text-sm font-medium border bg-slate-900 text-emerald-400 border-emerald-900 hover:border-emerald-500 hover:text-white transition-colors"
+          >
+            Struttura (Categorie/Ruoli)
+          </button>
+          <button
             onClick={() => router.push("/admin/quiz")}
             className="px-4 py-2 rounded-md text-sm font-medium border bg-slate-900 text-slate-300 border-slate-700 hover:border-sky-500 hover:text-white transition-colors"
           >
@@ -195,6 +201,9 @@ export default function AdminQuestionsPage() {
 
                     const subjectLabel = q.subjects?.name || (q.subject_id ? "..." : "-");
                     const quizLabel = q.quizzes?.title || (q.quiz_id ? "..." : "-");
+                    
+                    // Check for missing data (simple heuristic)
+                    const hasMissingData = !q.correct_option && !(q as any).correct_answer;
 
                     return (
                       <tr
@@ -204,7 +213,10 @@ export default function AdminQuestionsPage() {
                         <td className="py-3 px-4 font-mono text-[10px] text-slate-500">
                           {shortId}
                         </td>
-                        <td className="py-3 px-4 text-slate-200 font-medium">
+                        <td className="py-3 px-4 text-slate-200 font-medium relative">
+                          {hasMissingData && (
+                            <span className="absolute top-1 right-1 inline-flex items-center justify-center w-4 h-4 text-[9px] font-bold text-white bg-red-600 rounded-full" title="Risposta corretta mancante">!</span>
+                          )}
                           {truncatedText}
                         </td>
                         <td className="py-3 px-4 text-slate-400">

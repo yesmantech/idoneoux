@@ -39,6 +39,20 @@ function formatTime(seconds: number | null) {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+// Normalize helper
+function normalizeDBAnswer(val: string | null | undefined): string | null {
+  if (!val) return null;
+  return val.replace(/[.,:;()\[\]]/g, "").trim().toLowerCase();
+}
+
+function getCorrectOption(q: any): string | null {
+  if (!q) return null;
+  if (q.correct_option) return normalizeDBAnswer(q.correct_option);
+  if (q.correct_answer) return normalizeDBAnswer(q.correct_answer);
+  if (q.answer) return normalizeDBAnswer(q.answer);
+  return null;
+}
+
 export default function CustomQuizPage({
   params,
 }: {
@@ -89,6 +103,7 @@ export default function CustomQuizPage({
   const [quiz, setQuiz] = useState<QuizRow | null>(null);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [selectedQuestions, setSelectedQuestions] = useState<QuestionRow[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +113,9 @@ export default function CustomQuizPage({
     {}
   );
   const [finished, setFinished] = useState(false);
+  const [savingResult, setSavingResult] = useState(false);
+  const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const [result, setResult] = useState<{
     correct: number;
     wrong: number;
@@ -107,10 +125,18 @@ export default function CustomQuizPage({
 
   const [subjectBreakdown, setSubjectBreakdown] = useState<SubjectStat[]>([]);
 
+  // Image State
+  const [imgError, setImgError] = useState(false);
+
   // Timer
   const [customTimeLimit, setCustomTimeLimit] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [timerActive, setTimerActive] = useState(false);
+
+  // New Modes
+  const [autoNext, setAutoNext] = useState(false);
+  const [instantCheck, setInstantCheck] = useState(false);
+  const autoNextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load Data
   useEffect(() => {
@@ -118,6 +144,13 @@ export default function CustomQuizPage({
       setLoading(true);
       setError(null);
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push("/login");
+          return;
+        }
+        setUserId(user.id);
+
         const needAttempts =
           paramMode === "errors_recent" || paramMode === "most_wrong";
         
@@ -135,11 +168,11 @@ export default function CustomQuizPage({
           supabase.from("questions").select("*").eq("quiz_id", quizId),
           needAttempts
             ? supabase
-                .from("quiz_attempts" as any) // Assuming view/table exists
+                .from("quiz_attempts" as any) 
                 .select("id, answers, finished_at")
                 .eq("quiz_id", quizId)
                 .order("finished_at", { ascending: false })
-                .limit(paramMode === "errors_recent" ? recentAttemptsLimit : 500) // Fetch more for 'most_wrong' aggregation
+                .limit(paramMode === "errors_recent" ? recentAttemptsLimit : 500)
             : Promise.resolve({ data: null, error: null }),
         ]);
 
@@ -197,17 +230,11 @@ export default function CustomQuizPage({
           });
         } else if (paramMode === "errors_recent") {
           const seen = new Set<string>();
-          // Iterate attempts from newest
           outer: for (const att of attemptsData) {
             const answersArr = (att.answers || []) as any[];
             for (const ans of answersArr) {
               if (selected.length >= mostWrongLimit) break outer;
-              if (
-                ans.question_id &&
-                !ans.is_correct && 
-                !seen.has(ans.question_id) && 
-                activeById[ans.question_id]
-              ) {
+              if (ans.question_id && !ans.is_correct && !seen.has(ans.question_id) && activeById[ans.question_id]) {
                 seen.add(ans.question_id);
                 selected.push(activeById[ans.question_id]);
               }
@@ -238,11 +265,9 @@ export default function CustomQuizPage({
           throw new Error("Non ci sono abbastanza domande per generare il quiz con questi criteri.");
         }
 
-        // Setup Quiz
         const initialAnswers: Record<string, AnswerOption | null> = {};
         selected.forEach((q) => (initialAnswers[q.id] = null));
 
-        // Time logic
         const requestedMinutes = paramMinutes ? parseInt(paramMinutes, 10) : NaN;
         const minutes = (!Number.isNaN(requestedMinutes) && requestedMinutes > 0)
           ? requestedMinutes
@@ -250,8 +275,6 @@ export default function CustomQuizPage({
 
         setQuiz(qz);
         setSubjects(sbj);
-        setSelectedQuestions(selected); // Should shuffle final result for 'standard'? standard adds by subject block.
-        // Let's shuffle final list if standard, to mix subjects. Others are sorted by priority.
         if (paramMode === "standard") {
            setSelectedQuestions(shuffle(selected));
         } else {
@@ -265,6 +288,8 @@ export default function CustomQuizPage({
           setRemainingSeconds(minutes * 60);
           setTimerActive(true);
         }
+        
+        setStartedAt(Date.now());
 
       } catch (err: any) {
         console.error(err);
@@ -275,9 +300,8 @@ export default function CustomQuizPage({
     };
 
     load();
-  }, [quizId, paramMode, paramMinutes, paramSubjects, paramDist, paramAttempts, paramLimit]);
+  }, [quizId, paramMode, paramMinutes, paramSubjects, paramDist, paramAttempts, paramLimit, router]);
 
-  // Derived
   const subjectsMap = useMemo(() => {
     const map: Record<string, SubjectRow> = {};
     subjects.forEach((s) => (map[s.id] = s));
@@ -298,32 +322,58 @@ export default function CustomQuizPage({
       setRemainingSeconds((prev) => (prev !== null && prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerActive, finished, remainingSeconds]);
 
+  // --- Reset Image Error on Question Change ---
+  useEffect(() => {
+    setImgError(false);
+  }, [currentIndex]);
+
   // Handlers
-  const handleSelectAnswer = useCallback((qId: string, opt: AnswerOption) => {
-    if (finished) return;
-    setAnswers((prev) => ({ ...prev, [qId]: opt }));
-  }, [finished]);
-
-  const handleNext = useCallback(() => {
-    setCurrentIndex((prev) => Math.min(prev + 1, totalQuestions - 1));
-  }, [totalQuestions]);
-
-  const handlePrev = useCallback(() => {
-    setCurrentIndex((prev) => Math.max(prev - 1, 0));
+  const clearAutoNextTimeout = useCallback(() => {
+    if (autoNextTimeoutRef.current) {
+      clearTimeout(autoNextTimeoutRef.current);
+      autoNextTimeoutRef.current = null;
+    }
   }, []);
 
-  const handleFinish = useCallback((auto = false) => {
+  const handleNext = useCallback(() => {
+    clearAutoNextTimeout();
+    setCurrentIndex((prev) => Math.min(prev + 1, totalQuestions - 1));
+  }, [totalQuestions, clearAutoNextTimeout]);
+
+  const handlePrev = useCallback(() => {
+    clearAutoNextTimeout();
+    setCurrentIndex((prev) => Math.max(prev - 1, 0));
+  }, [clearAutoNextTimeout]);
+
+  const handleSelectAnswer = useCallback((qId: string, opt: AnswerOption) => {
+    if (finished) return;
+    
+    if (instantCheck && answers[qId]) return;
+
+    setAnswers((prev) => ({ ...prev, [qId]: opt }));
+
+    clearAutoNextTimeout();
+    if (autoNext) {
+      const delay = instantCheck ? 1200 : 0;
+      autoNextTimeoutRef.current = setTimeout(handleNext, delay);
+    }
+  }, [finished, instantCheck, answers, autoNext, handleNext, clearAutoNextTimeout]);
+
+  const handleFinish = useCallback(async (auto = false) => {
+    if (finished || savingResult) return;
     setFinished(true);
     setTimerActive(false);
-    if (auto) console.log("Time expired");
-
+    setSavingResult(true);
+    setSaveErrorMsg(null);
+    clearAutoNextTimeout();
+    
     let correct = 0;
     let wrong = 0;
     let blank = 0;
     const sbMap: Record<string, SubjectStat> = {};
+    const answersPayload = [];
 
     const ensureStat = (sid: string | null) => {
       const key = sid || "unknown";
@@ -342,20 +392,29 @@ export default function CustomQuizPage({
 
     selectedQuestions.forEach((q) => {
       const ans = answers[q.id];
-      const correctOpt = q.correct_option?.toLowerCase(); // normalized
+      const correctOpt = getCorrectOption(q);
+      const isCorrect = ans && ans === correctOpt;
       const stat = ensureStat(q.subject_id);
       
       stat.total++;
       if (!ans) {
         blank++;
         stat.blank++;
-      } else if (ans === correctOpt) {
+      } else if (isCorrect) {
         correct++;
         stat.correct++;
       } else {
         wrong++;
         stat.wrong++;
       }
+
+      answersPayload.push({
+        question_id: q.id,
+        subject_id: q.subject_id,
+        chosen_option: ans,
+        correct_answer: correctOpt,
+        is_correct: !!isCorrect
+      });
     });
 
     const pc = quiz?.points_correct ?? 1;
@@ -365,15 +424,49 @@ export default function CustomQuizPage({
 
     setResult({ correct, wrong, blank, score });
     setSubjectBreakdown(Object.values(sbMap));
-  }, [answers, selectedQuestions, subjectsMap, quiz]);
+
+    // SAVE TO DB
+    if (userId && quizId) {
+      try {
+        console.log("Saving custom attempt...");
+        const payload = {
+          quiz_id: quizId,
+          user_id: userId,
+          started_at: startedAt ? new Date(startedAt).toISOString() : new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          duration_seconds: startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0,
+          total_questions: selectedQuestions.length,
+          correct,
+          wrong,
+          blank,
+          score,
+          answers: answersPayload
+        };
+
+        const { error: saveError } = await supabase
+          .from("quiz_attempts")
+          .insert(payload);
+
+        if (saveError) {
+          console.error("Error saving custom attempt:", JSON.stringify(saveError, null, 2));
+          setSaveErrorMsg(`Errore salvataggio: ${saveError.message}`);
+        } else {
+          console.log("Custom attempt saved successfully.");
+        }
+      } catch (e: any) {
+        console.error("Exception saving attempt:", e);
+        setSaveErrorMsg("Errore imprevisto durante il salvataggio.");
+      } finally {
+        setSavingResult(false);
+      }
+    }
+  }, [answers, selectedQuestions, subjectsMap, quiz, clearAutoNextTimeout, userId, quizId, startedAt, finished, savingResult]);
 
   const answeredCount = useMemo(() => Object.values(answers).filter(Boolean).length, [answers]);
 
-  // --- RENDER ---
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Preparazione quiz...</div>;
   if (error || !quiz) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-red-400">{error || "Errore"}</div>;
 
-  // Results View
   if (finished && result) {
     return (
       <div className="min-h-screen bg-slate-950 text-white">
@@ -390,6 +483,12 @@ export default function CustomQuizPage({
               <span className="capitalize">{paramMode.replace("_", " ")}</span>
             </div>
           </div>
+
+          {saveErrorMsg && (
+            <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded text-red-300 text-xs">
+              Attenzione: {saveErrorMsg}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
@@ -446,25 +545,61 @@ export default function CustomQuizPage({
   }
 
   // Quiz View
+  const userAns = currentQuestion ? answers[currentQuestion.id] : null;
+  const showValidation = instantCheck && userAns !== null && userAns !== undefined;
+  
+  const correctKey = useMemo(() => {
+    return getCorrectOption(currentQuestion);
+  }, [currentQuestion]);
+
+  const isCorrect = showValidation && userAns === correctKey;
+  
+  // Image UI Logic
+  const rawImgUrl = currentQuestion.image_url || (currentQuestion as any).image;
+
+  // Debug log
+  useEffect(() => {
+    if (instantCheck && userAns) {
+      console.log(`[DEBUG Custom] Check:`, {
+        user: userAns,
+        dbRaw: currentQuestion?.correct_option,
+        dbNorm: correctKey,
+        isCorrect
+      });
+    }
+  }, [instantCheck, userAns, correctKey, isCorrect, currentQuestion]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto max-w-3xl px-4 py-8">
-        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <button onClick={() => router.push(`/quiz/${quizId}`)} className="text-xs text-slate-400 hover:text-white mb-1">← Esci</button>
             <h2 className="text-lg font-bold text-slate-100">{quiz.title} <span className="font-normal text-slate-500">| Custom</span></h2>
             <div className="text-xs text-slate-400 mt-1">Domanda {currentIndex + 1} di {totalQuestions} • Risposte: {answeredCount}</div>
           </div>
-          {customTimeLimit && (
-            <div className="text-right">
-              <div className="text-xs text-slate-500">Tempo</div>
-              <div className="text-xl font-mono font-medium text-slate-200">{formatTime(remainingSeconds)}</div>
+          
+          <div className="flex flex-col items-end gap-2">
+            {customTimeLimit && (
+              <div className="text-right">
+                <div className="text-xs text-slate-500">Tempo</div>
+                <div className="text-xl font-mono font-medium text-slate-200">{formatTime(remainingSeconds)}</div>
+              </div>
+            )}
+            
+            <div className="flex gap-4 text-[10px]">
+               <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" className="h-3 w-3" checked={autoNext} onChange={(e) => setAutoNext(e.target.checked)} />
+                <span className="text-slate-300">Auto-next</span>
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" className="h-3 w-3" checked={instantCheck} onChange={(e) => setInstantCheck(e.target.checked)} />
+                <span className="text-slate-300">Verifica istantanea</span>
+              </label>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Question Card */}
         {currentQuestion && (
           <div className="mb-6">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 mb-4 shadow-sm">
@@ -475,13 +610,21 @@ export default function CustomQuizPage({
               </div>
               <p className="text-base text-slate-100 leading-relaxed">{currentQuestion.text}</p>
               
-              {/* Image if needed */}
-              {(currentQuestion.image_url) && (
+              {rawImgUrl && !imgError ? (
                 <div className="mt-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={currentQuestion.image_url} alt="Question" className="max-h-60 rounded-lg border border-slate-800" />
+                  <img 
+                    src={rawImgUrl} 
+                    alt="Question" 
+                    className="max-h-60 rounded-lg border border-slate-800"
+                    onError={() => setImgError(true)}
+                  />
                 </div>
-              )}
+              ) : rawImgUrl && imgError ? (
+                <div className="mt-4 p-4 rounded-xl bg-rose-950/20 border border-rose-900 text-center">
+                   <p className="text-xs text-rose-400">⚠️ Immagine non trovata o caricamento fallito.</p>
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-3">
@@ -491,18 +634,34 @@ export default function CustomQuizPage({
                 if (!text) return null;
                 
                 const isSelected = answers[currentQuestion.id] === key;
+                
+                let buttonStyle = "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600";
+
+                if (showValidation && correctKey) {
+                    if (key === correctKey) {
+                        buttonStyle = isSelected 
+                            ? "bg-emerald-900/40 border-emerald-500 text-emerald-50" 
+                            : "bg-emerald-900/20 border-emerald-600/70 text-emerald-100";
+                    } else if (isSelected) {
+                        buttonStyle = "bg-rose-900/40 border-rose-500 text-rose-50 line-through";
+                    } else {
+                        buttonStyle = "bg-slate-950 border-slate-800 opacity-60";
+                    }
+                } else if (isSelected) {
+                    buttonStyle = "bg-sky-900/20 border-sky-500 text-sky-100";
+                }
+
                 return (
                   <button
                     key={key}
+                    disabled={finished || (instantCheck && answers[currentQuestion.id] !== undefined)}
                     onClick={() => handleSelectAnswer(currentQuestion.id, key)}
-                    className={`w-full text-left p-4 rounded-xl border transition-all ${
-                      isSelected 
-                        ? "bg-sky-900/20 border-sky-500 text-sky-100" 
-                        : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600"
-                    }`}
+                    className={`w-full text-left p-4 rounded-xl border transition-all ${buttonStyle} disabled:cursor-not-allowed`}
                   >
-                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full text-xs font-bold mr-3 ${
-                      isSelected ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-500"
+                    <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full text-xs font-bold mr-3 border ${
+                      isSelected || (showValidation && key === correctKey) 
+                        ? "border-transparent bg-white/20 text-white" 
+                        : "border-slate-600 text-slate-500"
                     }`}>
                       {key.toUpperCase()}
                     </span>
@@ -511,33 +670,19 @@ export default function CustomQuizPage({
                 );
               })}
             </div>
+            {showValidation && !correctKey && (
+              <div className="mt-3 text-xs text-amber-400 bg-amber-900/20 p-2 rounded border border-amber-800">
+                ⚠️ Dati mancanti: risposta corretta non impostata.
+              </div>
+            )}
           </div>
         )}
 
-        {/* Footer Nav */}
         <div className="flex justify-between items-center pt-4 border-t border-slate-800">
-          <button 
-            onClick={handlePrev} 
-            disabled={currentIndex === 0}
-            className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-800 disabled:opacity-50"
-          >
-            Precedente
-          </button>
-          
+          <button onClick={handlePrev} disabled={currentIndex === 0} className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-800 disabled:opacity-50">Precedente</button>
           <div className="flex gap-2">
-            <button 
-              onClick={() => handleFinish(false)}
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500"
-            >
-              Termina
-            </button>
-            <button 
-              onClick={handleNext} 
-              disabled={currentIndex === totalQuestions - 1}
-              className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-800 disabled:opacity-50"
-            >
-              Successiva
-            </button>
+            <button onClick={() => handleFinish(false)} className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500">Termina</button>
+            <button onClick={handleNext} disabled={currentIndex === totalQuestions - 1} className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-800 disabled:opacity-50">Successiva</button>
           </div>
         </div>
       </div>

@@ -1,192 +1,99 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-
-import { supabase } from "@/lib/supabaseClient";
-import type { Database } from "@/types/database";
-
-type QuizRow = Database["public"]["Tables"]["quizzes"]["Row"];
-type SubjectRow = Database["public"]["Tables"]["subjects"]["Row"];
-type QuestionRow = Database["public"]["Tables"]["questions"]["Row"];
+import { getCategories, type Category } from "@/lib/data";
 
 export default function HomePage() {
-  const [quizzes, setQuizzes] = useState<QuizRow[]>([]);
-  const [subjects, setSubjects] = useState<SubjectRow[]>([]);
-  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [
-          { data: qz, error: e1 },
-          { data: sbj, error: e2 },
-          { data: qs, error: e3 },
-        ] = await Promise.all([
-          supabase
-            .from("quizzes")
-            .select("*")
-            .order("created_at", { ascending: false }),
-          supabase.from("subjects").select("*"),
-          supabase.from("questions").select("*"),
-        ]);
-
-        if (e1) throw e1;
-        if (e2) throw e2;
-        if (e3) throw e3;
-
-        setQuizzes(qz || []);
-        setSubjects(sbj || []);
-        setQuestions(qs || []);
-      } catch (err: any) {
-        console.error(err);
-        setError(err.message || "Errore nel caricamento dei concorsi.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+    getCategories().then((data) => {
+      setCategories(data);
+      setLoading(false);
+    });
   }, []);
 
-  const statsByQuiz = useMemo(() => {
-    const subjectCount: Record<string, number> = {};
-    subjects.forEach((subject) => {
-      if (subject.quiz_id) {
-        subjectCount[subject.quiz_id] = (subjectCount[subject.quiz_id] || 0) + 1;
-      }
-    });
-
-    const questionCount: Record<string, number> = {};
-    questions.forEach((question) => {
-      if (question.quiz_id) {
-        questionCount[question.quiz_id] = (questionCount[question.quiz_id] || 0) + 1;
-      }
-    });
-
-    return { subjectCount, questionCount };
-  }, [subjects, questions]);
-
-  // Mostra solo concorsi NON archiviati
-  const visibleQuizzes = useMemo(
-    () => quizzes.filter((quiz) => !quiz.is_archived),
-    [quizzes]
-  );
-
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <main className="mx-auto max-w-5xl px-4 py-8 space-y-10">
-        {/* Banner / Hero */}
-        <section className="rounded-3xl border border-slate-800 bg-gradient-to-br from-sky-900/20 via-slate-900 to-emerald-900/10 p-8 shadow-xl shadow-sky-900/5">
-          <h1 className="text-3xl md:text-4xl font-bold mb-3 text-slate-100">
-            Allenati ai concorsi pubblici
-          </h1>
-          <p className="text-base md:text-lg text-slate-400 max-w-2xl leading-relaxed">
-            Scegli il concorso, le materie e inizia subito a fare quiz
-            ufficiali o personalizzati. Monitora le tue performance e supera la prova.
-          </p>
-          <div className="mt-6 flex gap-3">
-             <Link href="/me">
-                <button className="rounded-full bg-sky-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-sky-500 transition-colors shadow-lg shadow-sky-900/20">
-                  Vai alla Dashboard
-                </button>
-             </Link>
+    <div className="min-h-screen bg-white text-slate-900 pb-20">
+      {/* Top Section */}
+      <div className="p-4 space-y-4">
+        {/* Hero / Blog Card */}
+        <div className="w-full h-48 bg-slate-200 rounded-3xl relative overflow-hidden flex-shrink-0">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end p-6">
+            <span className="text-white font-bold text-lg">Blog & Novità</span>
           </div>
-        </section>
+        </div>
 
-        {/* Lista concorsi */}
-        <section>
-          <h2 className="text-xl font-semibold mb-5 text-slate-200 flex items-center gap-2">
-            <span className="w-1 h-6 rounded-full bg-emerald-500"></span>
-            Concorsi disponibili
-          </h2>
+        {/* Horizontal Scroll (Placeholder for secondary hero items) */}
+        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+          <div className="w-32 h-24 bg-sky-100 rounded-2xl flex-shrink-0 flex items-center justify-center text-sky-800 text-xs font-bold">
+            News
+          </div>
+          <div className="w-32 h-24 bg-emerald-100 rounded-2xl flex-shrink-0 flex items-center justify-center text-emerald-800 text-xs font-bold">
+            Bandi
+          </div>
+          <div className="w-32 h-24 bg-amber-100 rounded-2xl flex-shrink-0 flex items-center justify-center text-amber-800 text-xs font-bold">
+            Guide
+          </div>
+        </div>
 
-          {loading ? (
-            <div className="grid gap-4 md:grid-cols-2">
-               {[1, 2, 3].map(i => (
-                 <div key={i} className="h-32 rounded-2xl bg-slate-900/50 border border-slate-800 animate-pulse"></div>
-               ))}
+        {/* Search Bar */}
+        <div className="relative">
+          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          </div>
+          <input 
+            type="text" 
+            placeholder="banche dati, bandi, materie" 
+            className="w-full pl-10 pr-10 py-3 rounded-xl border-2 border-slate-900 bg-white text-sm placeholder-slate-500 focus:outline-none"
+          />
+          <div className="absolute inset-y-0 right-3 flex items-center">
+            <div className="w-6 h-6 bg-black rounded-md flex items-center justify-center">
+               <span className="text-white text-[10px]">🔍</span>
             </div>
-          ) : error ? (
-            <p className="text-sm text-red-400 bg-red-900/10 p-4 rounded-xl border border-red-900/20">{error}</p>
-          ) : visibleQuizzes.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">
-              Non ci sono concorsi attivi al momento.
-            </p>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {visibleQuizzes.map((quiz) => {
-                const { subjectCount, questionCount } = statsByQuiz;
-                const subjectsNum = subjectCount[quiz.id] || 0;
-                const questionsNum = questionCount[quiz.id] || 0;
+          </div>
+        </div>
+      </div>
 
-                const quizTitle = quiz.title || "Concorso senza titolo";
-                const quizDescription = quiz.description || "";
-                const quizYear = quiz.year ? `${quiz.year}` : null;
+      {/* In Primo Piano */}
+      <div className="mt-4 px-4">
+        <h2 className="text-lg font-bold mb-3">In primo piano</h2>
+        
+        {loading ? (
+          <div className="grid grid-cols-3 gap-3 animate-pulse">
+             {[1,2,3].map(i => <div key={i} className="aspect-[3/4] bg-slate-100 rounded-2xl"></div>)}
+          </div>
+        ) : categories.length > 0 ? (
+          <div className="grid grid-cols-3 gap-3">
+            {categories.map((cat) => (
+              <Link key={cat.slug} href={`/concorsi/${cat.slug}`} className="group">
+                <div className="aspect-[3/4] bg-slate-100 rounded-2xl border border-slate-200 flex flex-col items-center justify-center p-2 text-center hover:border-slate-900 transition-colors">
+                  <div className="w-10 h-10 bg-slate-300 rounded-full mb-2"></div>
+                  <span className="text-[10px] font-semibold leading-tight">{cat.title}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">Nessuna categoria disponibile.</p>
+        )}
+      </div>
 
-                return (
-                  <Link key={quiz.id} href={`/quiz/${quiz.id}`}>
-                    <div className="group h-full cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/40 p-5 hover:bg-slate-900/80 hover:border-sky-500/50 transition-all duration-200">
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                             {quizYear && (
-                               <span className="inline-flex items-center rounded-md bg-slate-800 px-2 py-1 text-[10px] font-medium text-slate-300 ring-1 ring-inset ring-slate-700/10">
-                                 {quizYear}
-                               </span>
-                             )}
-                             {quiz.total_questions && (
-                                <span className="inline-flex items-center rounded-md bg-slate-800 px-2 py-1 text-[10px] font-medium text-slate-300 ring-1 ring-inset ring-slate-700/10">
-                                  {quiz.total_questions} quesiti
-                                </span>
-                             )}
-                          </div>
-                          <h3 className="text-lg font-semibold text-slate-100 group-hover:text-sky-400 transition-colors">
-                            {quizTitle}
-                          </h3>
-                        </div>
-                        <div className="text-slate-500">
-                           <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                           </svg>
-                        </div>
-                      </div>
-
-                      {quizDescription && (
-                        <p className="text-xs text-slate-400 line-clamp-2 mb-4 leading-relaxed">
-                          {quizDescription}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-4 text-[11px] text-slate-500 font-medium border-t border-slate-800/50 pt-3 mt-auto">
-                        <span className="flex items-center gap-1.5">
-                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                           {subjectsNum} Materie
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                           <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
-                           {questionsNum} Domande
-                        </span>
-                        {quiz.time_limit && (
-                           <span className="flex items-center gap-1.5">
-                             <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                             {quiz.time_limit} min
-                           </span>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </main>
+      {/* Suggeriti */}
+      <div className="mt-8 px-4">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-bold">Suggeriti</h2>
+          <span className="text-slate-400 text-xl">›</span>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="w-32 aspect-[3/4] bg-slate-50 rounded-2xl border border-slate-200 flex-shrink-0"></div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
