@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom';
 import HomePage from './app/page';
 import LoginPage from './app/login/page';
 
@@ -117,7 +117,11 @@ export default function App() {
                             <Route path="/leaderboard" element={<MainLayout><LeaderboardPage /></MainLayout>} />
 
                             {/* Admin - Lazy loaded with Suspense */}
-                            <Suspense fallback={<AdminLoading />}>
+                            <Route element={
+                                <Suspense fallback={<AdminLoading />}>
+                                    <Outlet />
+                                </Suspense>
+                            }>
                                 <Route path="/admin" element={<AdminDashboardPage />} />
                                 <Route path="/admin/questions" element={<AdminQuestionsPage />} />
                                 <Route path="/admin/structure" element={<AdminStructurePage />} />
@@ -137,7 +141,7 @@ export default function App() {
                                 <Route path="/admin/blog/tag" element={<AdminBlogTagsPage />} />
                                 <Route path="/admin/blog/nuovo" element={<AdminBlogEditorPage />} />
                                 <Route path="/admin/blog/:id" element={<AdminBlogEditorPage />} />
-                            </Suspense>
+                            </Route>
                         </Routes>
                     </SidebarProvider>
                 </AuthProvider>
