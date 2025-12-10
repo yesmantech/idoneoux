@@ -23,3 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Export files
+idoneo_source.zip
+idoneo_codebase.txt
+scripts/concat_codebase.py
